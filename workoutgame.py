@@ -1,9 +1,11 @@
-import tkinter as tk
-from tkinter import messagebox
+import streamlit as st
 import json
 import os
 import random
 from datetime import date, datetime, timedelta
+
+st.set_page_config(page_title="Workout → Game Time", layout="centered")
+st.title("🎮 Gamified Workout Tracker")
 
 # --- Conversion rates ---
 conversion_rates = {
@@ -16,6 +18,7 @@ conversion_rates = {
     "Lunges (min)": 20
 }
 
+# --- File to save progress ---
 DATA_FILE = "game_progress.json"
 
 # --- Load or initialize progress ---
@@ -36,14 +39,14 @@ def save_progress():
     with open(DATA_FILE, "w") as f:
         json.dump(progress, f)
 
-# --- Daily Quest Functions ---
+# --- Daily Quest ---
 def generate_daily_quest():
     exercises = list(conversion_rates.keys())
     quest_exercise = random.choice(exercises)
     if "Plank" in quest_exercise:
-        amount = random.randint(30, 90)  # seconds
+        amount = random.randint(30, 90)
     else:
-        amount = random.randint(5, 20)  # minutes
+        amount = random.randint(5, 20)
     reward = amount * conversion_rates[quest_exercise]
     progress["daily_quest"] = {
         "exercise": quest_exercise,
@@ -53,56 +56,67 @@ def generate_daily_quest():
         "completed": False
     }
     save_progress()
-    messagebox.showinfo("Daily Quest",
-                        f"🎯 New Daily Quest:\nDo {amount} {quest_exercise} today for {reward:.1f} bonus XP!")
 
-def check_daily_quest():
+def check_daily_quest(user_inputs):
     quest = progress.get("daily_quest")
     today_str = str(date.today())
-    # Generate new quest if none exists or new day
     if quest is None or quest["date"] != today_str:
         generate_daily_quest()
         quest = progress["daily_quest"]
     # Check completion
-    exercise_done = entries[quest["exercise"]].get()
-    try:
-        amount_done = float(exercise_done)
-    except ValueError:
-        amount_done = 0
+    amount_done = float(user_inputs.get(quest["exercise"], 0))
     if not quest["completed"] and amount_done >= quest["amount"]:
         progress["total_xp"] += quest["reward"]
         quest["completed"] = True
-        save_progress()
-        messagebox.showinfo("Quest Completed!",
-                            f"✅ You completed today's quest!\nBonus {quest['reward']:.1f} XP awarded!")
+        st.balloons()
+        st.success(f"✅ Daily Quest Completed! Bonus {quest['reward']:.1f} XP awarded!")
 
-# --- Main calculation function ---
-def calculate():
+# --- User Input ---
+st.subheader("Enter your workout for today:")
+user_inputs = {}
+for exercise in conversion_rates:
+    if "Plank" in exercise:
+        user_inputs[exercise] = st.number_input(f"{exercise}", 0, 300, step=5)
+    else:
+        user_inputs[exercise] = st.number_input(f"{exercise}", 0, 60, step=1)
+
+if st.button("Calculate Game Time & XP"):
+    # Calculate total game time / XP
     total_game_time = 0
-    details = []
     for exercise, rate in conversion_rates.items():
-        try:
-            amount = float(entries[exercise].get())
-        except ValueError:
-            amount = 0
-        earned = amount * rate
-        if earned > 0:
-            details.append(f"{exercise}: {earned:.1f} min")
-        total_game_time += earned
+        amount = float(user_inputs.get(exercise, 0))
+        total_game_time += amount * rate
 
-    # XP = total_game_time
     earned_xp = total_game_time
+
+    # --- Random loot ---
+    loot_chance = random.random()
+    loot_message = ""
+    if loot_chance < 0.2:
+        multiplier = random.choice([1.5, 2, 2.5])
+        earned_xp *= multiplier
+        loot_message = f"🍀 Lucky! XP multiplied by {multiplier}!"
+    elif loot_chance < 0.35:
+        bonus_xp = random.randint(10, 50)
+        earned_xp += bonus_xp
+        loot_message = f"🎁 Bonus! +{bonus_xp} XP!"
+
+    if loot_message:
+        st.success(loot_message)
+
+    # Add XP
     progress["total_xp"] += earned_xp
 
-    # Level system: Level up every 500 XP
+    # --- Level up ---
     new_level = progress["level"]
     while progress["total_xp"] >= new_level * 500:
         new_level += 1
     if new_level > progress["level"]:
         progress["level"] = new_level
-        messagebox.showinfo("Level Up!", f"🎉 Congrats! You reached Level {new_level}!")
+        st.balloons()
+        st.success(f"🎉 Congrats! You reached Level {new_level}!")
 
-    # Badges
+    # --- Badges ---
     badges_earned = []
     if total_game_time >= 100 and "100 Min Single Session" not in progress["badges"]:
         progress["badges"].append("100 Min Single Session")
@@ -110,13 +124,16 @@ def calculate():
     if total_game_time >= 30 and "Quick Workout" not in progress["badges"]:
         progress["badges"].append("Quick Workout")
         badges_earned.append("🏅 Quick Workout")
+    if loot_message and "Lucky Workout" not in progress["badges"]:
+        progress["badges"].append("Lucky Workout")
+        badges_earned.append("✨ Lucky Workout Badge!")
     if badges_earned:
-        messagebox.showinfo("New Badges!", "\n".join(badges_earned))
+        st.success("New Badges!\n" + "\n".join(badges_earned))
 
-    # Streak tracking
+    # --- Streak tracking ---
     today_str = str(date.today())
     if progress["last_date"] != today_str:
-        if progress["last_date"] is not None:
+        if progress["last_date"]:
             try:
                 last_date_obj = datetime.strptime(progress["last_date"], "%Y-%m-%d").date()
                 if last_date_obj == date.today() - timedelta(days=1):
@@ -129,36 +146,15 @@ def calculate():
             progress["streak"] = 1
         progress["last_date"] = today_str
 
-    # Check daily quest
-    check_daily_quest()
+    # --- Check daily quest ---
+    check_daily_quest(user_inputs)
 
+    # Save progress
     save_progress()
 
-    result_label.config(text=f"🎮 Total Gaming Time: {total_game_time:.1f} min\n"
-                             f"XP: {progress['total_xp']:.1f} | Level: {progress['level']} | Streak: {progress['streak']} days")
-    if details:
-        messagebox.showinfo("Details", "\n".join(details))
-
-# --- GUI setup ---
-root = tk.Tk()
-root.title("Exercise → Gaming Calculator (Gamified)")
-
-entries = {}
-row = 0
-for exercise in conversion_rates:
-    tk.Label(root, text=exercise).grid(row=row, column=0, padx=10, pady=5, sticky="w")
-    entry = tk.Entry(root)
-    entry.insert(0, "0")
-    entry.grid(row=row, column=1, padx=10, pady=5)
-    entries[exercise] = entry
-    row += 1
-
-calc_button = tk.Button(root, text="Calculate", command=calculate)
-calc_button.grid(row=row, column=0, columnspan=2, pady=10)
-
-result_label = tk.Label(root, text=f"🎮 Total Gaming Time: 0 min | XP: {progress['total_xp']} | "
-                                   f"Level: {progress['level']} | Streak: {progress['streak']} days",
-                        font=("Arial", 12, "bold"))
-result_label.grid(row=row+1, column=0, columnspan=2, pady=10)
-
-root.mainloop()
+    # --- Display summary ---
+    st.subheader("Summary:")
+    st.write(f"🎮 Total Gaming Time: {total_game_time:.1f} min")
+    st.write(f"XP: {progress['total_xp']:.1f} | Level: {progress['level']} | Streak: {progress['streak']} days")
+    if progress["badges"]:
+        st.write("🏆 Badges: " + ", ".join(progress["badges"]))
